@@ -40,7 +40,7 @@ export default function Home() {
 
     setCurrentPlayer(newPlayer)
     setRoomId(enteredRoomId)
-
+    console.log(enteredRoomId,newPlayer);
     // 保存状态到localStorage
     localStorage.setItem("current_room_id", enteredRoomId)
     localStorage.setItem("current_player", JSON.stringify(newPlayer))
