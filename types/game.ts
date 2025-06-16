@@ -34,3 +34,11 @@ export interface RoundResult {
     amount: number
   }>
 }
+
+export interface PlayerAction {
+  playerId: string
+  playerName: string
+  action: "bet" | "call" | "raise" | "fold" | "check" | "all-in"
+  amount: number
+  timestamp: number
+}

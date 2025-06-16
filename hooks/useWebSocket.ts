@@ -29,8 +29,42 @@ class MockWebSocketServer {
   static getInstance() {
     if (!MockWebSocketServer.instance) {
       MockWebSocketServer.instance = new MockWebSocketServer()
+      // 从localStorage恢复数据
+      MockWebSocketServer.instance.loadFromStorage()
     }
     return MockWebSocketServer.instance
+  }
+
+  // 保存到localStorage
+  private saveToStorage() {
+    try {
+      const roomsData = Array.from(this.rooms.entries())
+      const chatData = Array.from(this.chatHistory.entries())
+      localStorage.setItem("poker_rooms", JSON.stringify(roomsData))
+      localStorage.setItem("poker_chat", JSON.stringify(chatData))
+    } catch (error) {
+      console.error("Failed to save to localStorage:", error)
+    }
+  }
+
+  // 从localStorage加载
+  private loadFromStorage() {
+    try {
+      const roomsData = localStorage.getItem("poker_rooms")
+      const chatData = localStorage.getItem("poker_chat")
+
+      if (roomsData) {
+        const rooms = JSON.parse(roomsData)
+        this.rooms = new Map(rooms)
+      }
+
+      if (chatData) {
+        const chat = JSON.parse(chatData)
+        this.chatHistory = new Map(chat)
+      }
+    } catch (error) {
+      console.error("Failed to load from localStorage:", error)
+    }
   }
 
   subscribe(roomId: string, callback: (message: WebSocketMessage) => void) {
@@ -47,7 +81,13 @@ class MockWebSocketServer {
   broadcast(roomId: string, message: WebSocketMessage) {
     const callbacks = this.connections.get(roomId)
     if (callbacks) {
-      callbacks.forEach((callback) => callback(message))
+      callbacks.forEach((callback) => {
+        try {
+          callback(message)
+        } catch (error) {
+          console.error("Broadcast error:", error)
+        }
+      })
     }
   }
 
@@ -65,6 +105,8 @@ class MockWebSocketServer {
         currentRound: 0,
         gameStarted: false,
         roundStarted: false,
+        pot: 0,
+        currentPlayerIndex: 0,
         chatMessages: [],
       }
       this.rooms.set(roomId, room)
@@ -78,11 +120,15 @@ class MockWebSocketServer {
       // 检查玩家是否已存在
       const existingPlayer = room.players.find((p) => p.name === player.name)
       if (existingPlayer) {
-        throw new Error("玩家名称已存在")
+        // 如果是重新连接，更新玩家信息
+        room.players = room.players.map((p) => (p.name === player.name ? { ...p, ...player, chips: p.chips } : p))
+      } else {
+        room.players.push(player)
       }
-
-      room.players.push(player)
     }
+
+    // 保存状态
+    this.saveToStorage()
 
     // 广播玩家加入消息
     this.broadcast(roomId, {
@@ -101,15 +147,15 @@ class MockWebSocketServer {
       type: "system",
     }
 
-    const chatHistory = this.chatHistory.get(roomId) || []
-    chatHistory.push(systemMessage)
-    this.chatHistory.set(roomId, chatHistory)
+    this.sendChatMessage(roomId, systemMessage)
 
     return room
   }
 
   updateGameState(roomId: string, newState: GameState) {
     this.rooms.set(roomId, newState)
+    this.saveToStorage()
+
     this.broadcast(roomId, {
       type: "update_game_state",
       payload: newState,
@@ -121,6 +167,7 @@ class MockWebSocketServer {
     const chatHistory = this.chatHistory.get(roomId) || []
     chatHistory.push(message)
     this.chatHistory.set(roomId, chatHistory)
+    this.saveToStorage()
 
     this.broadcast(roomId, {
       type: "chat_message",
@@ -131,6 +178,10 @@ class MockWebSocketServer {
 
   getChatHistory(roomId: string): ChatMessage[] {
     return this.chatHistory.get(roomId) || []
+  }
+
+  getRoom(roomId: string): GameState | undefined {
+    return this.rooms.get(roomId)
   }
 }
 
@@ -144,13 +195,24 @@ export function useWebSocket(roomId: string) {
     serverRef.current = MockWebSocketServer.getInstance()
     setIsConnected(true)
 
+    // 获取现有房间状态
+    const existingRoom = serverRef.current.getRoom(roomId)
+    if (existingRoom) {
+      setGameState(existingRoom)
+    }
+
     const unsubscribe = serverRef.current.subscribe(roomId, (message: WebSocketMessage) => {
       switch (message.type) {
         case "update_game_state":
           setGameState(message.payload)
           break
         case "chat_message":
-          setChatMessages((prev) => [...prev, message.payload])
+          setChatMessages((prev) => {
+            // 避免重复消息
+            const exists = prev.find((m) => m.id === message.payload.id)
+            if (exists) return prev
+            return [...prev, message.payload]
+          })
           break
       }
     })
@@ -188,7 +250,7 @@ export function useWebSocket(roomId: string) {
       if (!serverRef.current) return
 
       const chatMessage: ChatMessage = {
-        id: Date.now().toString(),
+        id: `${Date.now()}-${Math.random()}`,
         playerId,
         playerName,
         message,
@@ -206,7 +268,7 @@ export function useWebSocket(roomId: string) {
       if (!serverRef.current) return
 
       const actionMessage: ChatMessage = {
-        id: Date.now().toString(),
+        id: `${Date.now()}-${Math.random()}`,
         playerId,
         playerName,
         message: action,

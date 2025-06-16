@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Crown, Users, Settings, Plus, DollarSign, MessageCircle, Play, RotateCcw } from "lucide-react"
+import { Crown, Users, Settings, Plus, DollarSign, MessageCircle, Play, RotateCcw, LogOut, Eye } from "lucide-react"
 import { useWebSocket } from "@/hooks/useWebSocket"
 import { ChatPanel } from "@/components/chat-panel"
 import type { Player } from "@/types/game"
@@ -24,9 +24,10 @@ import type { Player } from "@/types/game"
 interface PokerRoomProps {
   roomId: string
   currentPlayer: Player
+  onLeaveRoom: () => void
 }
 
-export function PokerRoom({ roomId, currentPlayer }: PokerRoomProps) {
+export function PokerRoom({ roomId, currentPlayer, onLeaveRoom }: PokerRoomProps) {
   const { isConnected, gameState, chatMessages, joinRoom, updateGameState, sendChatMessage, sendActionMessage } =
     useWebSocket(roomId)
   const [betAmount, setBetAmount] = useState("")
@@ -70,8 +71,32 @@ export function PokerRoom({ roomId, currentPlayer }: PokerRoomProps) {
 
   const handleBet = (amount: number) => {
     if (currentPlayerInGame.chips >= amount) {
-      updatePlayerChips(currentPlayer.id, -amount)
-      sendActionMessage(`下注 $${amount}`, currentPlayer.id, currentPlayer.name)
+      // 更新玩家筹码和当前下注
+      const updatedPlayers = gameState.players.map((player) =>
+        player.id === currentPlayer.id
+          ? {
+              ...player,
+              chips: Math.max(0, player.chips - amount),
+              currentBet: player.currentBet + amount,
+              hasActed: true,
+            }
+          : player,
+      )
+
+      // 更新底池
+      const newPot = gameState.pot + amount
+
+      updateGameState({
+        ...gameState,
+        players: updatedPlayers,
+        pot: newPot,
+      })
+
+      sendActionMessage(
+        `下注 $${amount} (总下注: $${currentPlayerInGame.currentBet + amount})`,
+        currentPlayer.id,
+        currentPlayer.name,
+      )
     }
   }
 
@@ -98,6 +123,7 @@ export function PokerRoom({ roomId, currentPlayer }: PokerRoomProps) {
       ...gameState,
       currentRound: gameState.currentRound + 1,
       roundStarted: true,
+      pot: 0,
       players: gameState.players.map((p) => ({ ...p, currentBet: 0, hasActed: false, isFolded: false })),
     }
     updateGameState(newState)
@@ -125,7 +151,11 @@ export function PokerRoom({ roomId, currentPlayer }: PokerRoomProps) {
       players: gameState.players.map((p) => ({ ...p, currentBet: 0, hasActed: false, isFolded: false })),
     }
     updateGameState(newState)
-    sendActionMessage(`第 ${gameState.currentGame} 局第 ${gameState.currentRound} 轮结束`, "system", "System")
+    sendActionMessage(
+      `第 ${gameState.currentGame} 局第 ${gameState.currentRound} 轮结束，底池: $${gameState.pot}`,
+      "system",
+      "System",
+    )
   }
 
   return (
@@ -139,20 +169,55 @@ export function PokerRoom({ roomId, currentPlayer }: PokerRoomProps) {
               玩家列表 ({gameState.players.length})
             </CardTitle>
             <div className="text-sm text-muted-foreground">房间ID: {roomId}</div>
+            <Button onClick={onLeaveRoom} variant="outline" size="sm" className="mt-2">
+              <LogOut className="w-4 h-4 mr-2" />
+              离开房间
+            </Button>
           </CardHeader>
           <CardContent className="space-y-3">
             {gameState.players.map((player) => (
-              <div key={player.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                <div className="flex items-center gap-2">
-                  {player.isMaster && <Crown className="w-4 h-4 text-yellow-500" />}
-                  <span className={`font-medium ${player.id === currentPlayer.id ? "text-green-600" : ""}`}>
-                    {player.name}
-                  </span>
-                  {player.id === currentPlayer.id && <Badge variant="secondary">你</Badge>}
+              <div key={player.id} className="flex flex-col p-3 bg-muted rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    {player.isMaster && <Crown className="w-4 h-4 text-yellow-500" />}
+                    <span className={`font-medium ${player.id === currentPlayer.id ? "text-green-600" : ""}`}>
+                      {player.name}
+                    </span>
+                    {player.id === currentPlayer.id && <Badge variant="secondary">你</Badge>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <DollarSign className="w-4 h-4 text-green-600" />
+                    <span className="font-mono font-bold">{player.chips}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <DollarSign className="w-4 h-4 text-green-600" />
-                  <span className="font-mono font-bold">{player.chips}</span>
+
+                {/* 显示当前轮下注信息 */}
+                {gameState.roundStarted && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">本轮下注:</span>
+                    <span className={`font-mono ${player.currentBet > 0 ? "text-blue-600" : "text-muted-foreground"}`}>
+                      ${player.currentBet}
+                    </span>
+                  </div>
+                )}
+
+                {/* 显示玩家状态 */}
+                <div className="flex gap-1 mt-1">
+                  {player.hasActed && (
+                    <Badge variant="outline" className="text-xs">
+                      已行动
+                    </Badge>
+                  )}
+                  {player.isFolded && (
+                    <Badge variant="destructive" className="text-xs">
+                      已弃牌
+                    </Badge>
+                  )}
+                  {!player.isActive && (
+                    <Badge variant="secondary" className="text-xs">
+                      离线
+                    </Badge>
+                  )}
                 </div>
               </div>
             ))}
@@ -172,12 +237,21 @@ export function PokerRoom({ roomId, currentPlayer }: PokerRoomProps) {
               <Badge variant={gameState.roundStarted ? "default" : "secondary"}>
                 {gameState.roundStarted ? "进行中" : "等待开始"}
               </Badge>
+              <Badge variant="outline" className="text-lg px-3 py-1">
+                <Eye className="w-4 h-4 mr-1" />
+                底池: ${gameState.pot}
+              </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="text-center p-6 bg-muted rounded-lg">
               <div className="text-sm text-muted-foreground mb-2">你的筹码</div>
               <div className="text-3xl font-bold text-green-600">${currentPlayerInGame.chips}</div>
+              {gameState.roundStarted && (
+                <div className="text-sm text-muted-foreground mt-2">
+                  本轮已下注: <span className="font-mono text-blue-600">${currentPlayerInGame.currentBet}</span>
+                </div>
+              )}
             </div>
 
             <Separator />

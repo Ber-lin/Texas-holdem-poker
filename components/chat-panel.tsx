@@ -20,12 +20,11 @@ interface ChatPanelProps {
 export function ChatPanel({ messages, currentPlayer, onSendMessage }: ChatPanelProps) {
   const [inputMessage, setInputMessage] = useState("")
   const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // 自动滚动到底部
   useEffect(() => {
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
   const handleSendMessage = () => {
@@ -59,14 +58,16 @@ export function ChatPanel({ messages, currentPlayer, onSendMessage }: ChatPanelP
         </Badge>
       </div>
 
-      <ScrollArea className="flex-1 h-64 mb-3 border rounded-md p-3" ref={scrollAreaRef}>
+      <ScrollArea className="flex-1 h-64 mb-3 border rounded-md p-3">
         <div className="space-y-2">
           {messages.map((message) => (
             <div key={message.id} className="text-sm">
               {message.type === "system" ? (
-                <div className="text-center text-muted-foreground italic py-1">{message.message}</div>
+                <div className="text-center text-muted-foreground italic py-1 bg-muted/50 rounded px-2">
+                  {message.message}
+                </div>
               ) : message.type === "action" ? (
-                <div className="text-center text-blue-600 italic py-1">{message.message}</div>
+                <div className="text-center text-blue-600 italic py-1 bg-blue-50 rounded px-2">{message.message}</div>
               ) : (
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -75,11 +76,14 @@ export function ChatPanel({ messages, currentPlayer, onSendMessage }: ChatPanelP
                     </span>
                     <span className="text-xs text-muted-foreground">{formatTime(message.timestamp)}</span>
                   </div>
-                  <div className="pl-2 border-l-2 border-muted">{message.message}</div>
+                  <div className="pl-2 border-l-2 border-muted bg-background/50 rounded-r px-2 py-1">
+                    {message.message}
+                  </div>
                 </div>
               )}
             </div>
           ))}
+          <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 
